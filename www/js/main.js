@@ -8,7 +8,6 @@
 
 const connectButton    = document.querySelector('button#connectButton');
 const disconnectButton = document.querySelector('button#disconnectButton');
-const audio            = document.querySelector('audio#audio');
 const remoteVideo      = document.getElementById('remoteVideo');
 
 connectButton.onclick     = connect_call;
@@ -105,10 +104,6 @@ function connect_call()
 
 		console.log("ontrack: got track: kind='%s'", track.kind);
 
-		if (audio.srcObject !== event.streams[0]) {
-			audio.srcObject = event.streams[0];
-			console.log("ontrack: got audio stream");
-		}
 
 		if (remoteVideo.srcObject !== event.streams[0]) {
 			remoteVideo.srcObject = event.streams[0];
@@ -118,41 +113,9 @@ function connect_call()
 
 	console.log("Requesting local stream");
 
-	let safeUserMedia =	navigator.mediaDevices != undefined 
-		? navigator.mediaDevices.getUserMedia(gum_constraints) 
-		: new Promise((_, reject) => reject("navigator.mediaDevices is undefined"));
-
-	safeUserMedia
-		.then(function(stream) {
-
-			// save the stream
-			localStream = stream;
-
-			// type: MediaStreamTrack
-			const audioTracks = localStream.getAudioTracks();
-			const videoTracks = localStream.getVideoTracks();
-
-			if (audioTracks.length > 0) {
-				console.log("Using Audio device: '%s'",
-					    audioTracks[0].label);
-			}
-			if (videoTracks.length > 0) {
-				console.log("Using Video device: '%s'",
-					    videoTracks[0].label);
-			}
-
-			localStream.getTracks()
-				.forEach(track => pc.addTrack(track, localStream));
-		
-		})
-		.catch(function(error) {
-
-			alert("Get User Media: " + error);
-		})
-		.then(function(stream) {
-			disconnectButton.disabled = false;
-			send_post_connect();
-		});
+	disconnectButton.disabled = false;
+	send_post_connect();
+	
 }
 
 

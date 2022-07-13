@@ -157,8 +157,7 @@ static void peerconnection_estab_handler(struct media_track *media, void *arg)
 	switch (mediatrack_kind(media)) {
 
 	case MEDIA_KIND_AUDIO:
-		err = mediatrack_start_audio(media, baresip_ausrcl(),
-					     baresip_aufiltl());
+		err = mediatrack_start_audio(media);
 		if (err) {
 			warning("demo: could not start audio (%m)\n", err);
 		}

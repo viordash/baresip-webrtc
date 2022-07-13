@@ -39,8 +39,7 @@ struct media_track *media_track_add(struct list *lst,
 }
 
 
-int mediatrack_start_audio(struct media_track *media,
-			   struct list *ausrcl, struct list *aufiltl)
+int mediatrack_start_audio(struct media_track *media)
 {
 	const struct sdp_format *fmt;
 	struct audio *au;
@@ -66,13 +65,6 @@ int mediatrack_start_audio(struct media_track *media,
 		if (err) {
 			warning("mediatrack: start:"
 				" audio_encoder_set error: %m\n", err);
-			return err;
-		}
-
-		err = audio_start_source(au, ausrcl, aufiltl);
-		if (err) {
-			warning("mediatrack: start:"
-				" audio_start_source error: %m\n", err);
 			return err;
 		}
 	}

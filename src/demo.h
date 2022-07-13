@@ -130,8 +130,7 @@ struct media_track {
 struct media_track *media_track_add(struct list *lst,
 				    enum media_kind kind,
 				    mediatrack_close_h *closeh, void *arg);
-int  mediatrack_start_audio(struct media_track *media,
-			    struct list *ausrcl, struct list *aufiltl);
+int  mediatrack_start_audio(struct media_track *media);
 int  mediatrack_start_video(struct media_track *media);
 void mediatrack_stop(struct media_track *media);
 enum media_kind mediatrack_kind(const struct media_track *media);
