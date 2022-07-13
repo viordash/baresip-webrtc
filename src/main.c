@@ -30,7 +30,6 @@ static const char *modv[] = {
 
 	/* video */
 	"avcodec",
-	"avformat",
 	"fakevideo"
 };
 
@@ -166,9 +165,9 @@ int main(int argc, char *argv[])
 		 "440",
 		 sizeof(config->audio.src_dev));
 
-	str_ncpy(config->video.src_mod, "avformat",
+	str_ncpy(config->video.src_mod, "fakevideo",
 		 sizeof(config->video.src_mod));
-	str_ncpy(config->video.src_dev, "lavfi,testsrc2=size=vga:rate=30",
+	str_ncpy(config->video.src_dev, "",
 		 sizeof(config->video.src_dev));
 
 	config->audio.level = true;
