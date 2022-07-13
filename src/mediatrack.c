@@ -119,13 +119,6 @@ int mediatrack_start_video(struct media_track *media)
 				" video_start_source error: %m\n", err);
 			return err;
 		}
-
-		err = video_start_display(vid, "webrtc");
-		if (err) {
-			warning("mediatrack: start:"
-				" video_start_display error: %m\n", err);
-			return err;
-		}
 	}
 	else {
 		info("mediatrack: video stream is disabled..\n");

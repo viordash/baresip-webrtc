@@ -25,17 +25,12 @@ static const char *modv[] = {
 	"dtls_srtp",
 
 	/* audio */
-	"opus",
-	"g722",
 	"g711",
 	"ausine",
 
 	/* video */
 	"avcodec",
-	"vp8",
-	"vp9",
 	"avformat",
-	"sdl",
 	"fakevideo"
 };
 
@@ -173,16 +168,16 @@ int main(int argc, char *argv[])
 
 	str_ncpy(config->video.src_mod, "avformat",
 		 sizeof(config->video.src_mod));
-	str_ncpy(config->video.src_dev, "lavfi,testsrc2",
+	str_ncpy(config->video.src_dev, "lavfi,testsrc2=size=vga:rate=30",
 		 sizeof(config->video.src_dev));
 
 	config->audio.level = true;
 
-	config->video.bitrate = 2000000;
+	config->video.bitrate = 6000000;
 	config->video.fps = 30.0;
 	config->video.fullscreen = false;
-	config->video.width  = 320;
-	config->video.height = 240;
+	config->video.width  = 640;
+	config->video.height = 480;
 
 	/* override default config */
 	config->avt.rtcp_mux = true;
