@@ -16,241 +16,27 @@ enum {
 };
 
 
-struct session {
-	struct le le;
-	struct peer_connection *pc;
-	struct http_conn *conn_pending;
-	char *id;
-};
-
-
 static struct demo {
 	struct list sessl;
-	uint32_t session_counter;
 	const struct mnat *mnat;
 	const struct menc *menc;
+	struct http_sock *httpsock;
+	struct http_sock *httpssock;
+	const char *www_path;
 } demo;
 
 
-static struct http_sock *httpsock;
-static struct http_sock *httpssock;
 static struct rtc_configuration pc_config = {
 	.offerer = true
 };
 
 
-static void destructor(void *data)
-{
-	struct session *sess = data;
-
-	list_unlink(&sess->le);
-	mem_deref(sess->conn_pending);
-	mem_deref(sess->pc);
-	mem_deref(sess->id);
-}
-
-
-static void session_close(struct session *sess, int err)
-{
-	if (err)
-		warning("demo: session '%s' closed (%m)\n", sess->id, err);
-	else
-		info("demo: session '%s' closed\n", sess->id);
-
-	sess->pc = mem_deref(sess->pc);
-
-	if (err) {
-		http_ereply(sess->conn_pending, 500, "Session closed");
-	}
-
-	mem_deref(sess);
-}
-
-
-static struct session *session_lookup(const struct http_msg *msg)
-{
-	const struct http_hdr *hdr;
-
-	hdr = http_msg_xhdr(msg, "Session-ID");
-	if (!hdr) {
-		warning("demo: no Session-ID header\n");
-		return NULL;
-	}
-
-	for (struct le *le = demo.sessl.head; le; le = le->next) {
-
-		struct session *sess = le->data;
-
-		if (0 == pl_strcasecmp(&hdr->val, sess->id))
-			return sess;
-	}
-
-	warning("demo: session not found (%r)\n", &hdr->val);
-
-	return NULL;
-}
-
-
-static void peerconnection_gather_handler(void *arg)
-{
-	struct session *sess = arg;
-	struct mbuf *mb_sdp = NULL;
-	enum sdp_type type;
-	int err;
-
-	switch (peerconnection_signaling(sess->pc)) {
-
-	case SS_STABLE:
-		type = SDP_OFFER;
-		break;
-
-	case SS_HAVE_LOCAL_OFFER:
-		warning("illegal state\n");
-		type = SDP_OFFER;
-		break;
-
-	case SS_HAVE_REMOTE_OFFER:
-		type = SDP_ANSWER;
-		break;
-	}
-
-	info("demo: session gathered -- send sdp '%s'\n", sdptype_name(type));
-
-	if (type == SDP_OFFER)
-		err = peerconnection_create_offer(sess->pc, &mb_sdp);
-	else
-		err = peerconnection_create_answer(sess->pc, &mb_sdp);
-	if (err)
-		goto out;
-
-	err = http_reply_descr(sess->conn_pending, sess->id, type, mb_sdp);
-	if (err) {
-		warning("demo: reply error: %m\n", err);
-		goto out;
-	}
-
-	if (type == SDP_ANSWER) {
-
-		err = peerconnection_start_ice(sess->pc);
-		if (err) {
-			warning("demo: failed to start ice (%m)\n", err);
-			goto out;
-		}
-	}
-
- out:
-	mem_deref(mb_sdp);
-
-	if (err)
-		session_close(sess, err);
-}
-
-
-static void peerconnection_estab_handler(struct media_track *media, void *arg)
-{
-	struct session *sess = arg;
-	int err = 0;
-
-	info("demo: stream established: '%s'\n",
-	     media_kind_name(mediatrack_kind(media)));
-
-	switch (mediatrack_kind(media)) {
-
-	case MEDIA_KIND_AUDIO:
-		err = mediatrack_start_audio(media, baresip_ausrcl(),
-					     baresip_aufiltl());
-		if (err) {
-			warning("demo: could not start audio (%m)\n", err);
-		}
-		break;
-
-	case MEDIA_KIND_VIDEO:
-		err = mediatrack_start_video(media);
-		if (err) {
-			warning("demo: could not start video (%m)\n", err);
-		}
-		break;
-
-	default:
-		break;
-	}
-
-	if (err) {
-		session_close(sess, err);
-		return;
-	}
-
-	stream_enable(media_get_stream(media), true);
-}
-
-
-static void peerconnection_close_handler(int err, void *arg)
-{
-	struct session *sess = arg;
-
-	warning("demo: session closed (%m)\n", err);
-
-	session_close(sess, err);
-}
-
-
-static int session_new(struct session **sessp)
-{
-	const struct config *config = conf_config();
-	struct session *sess;
-	int err;
-
-	info("demo: create session\n");
-
-	sess = mem_zalloc(sizeof(*sess), destructor);
-	if (!sess)
-		return ENOMEM;
-
-	/* generate a unique session id */
-	re_sdprintf(&sess->id, "%u", ++demo.session_counter);
-
-	/* create a new session object, send SDP to it */
-	err = peerconnection_new(&sess->pc, &pc_config, demo.mnat, demo.menc,
-				 peerconnection_gather_handler,
-				 peerconnection_estab_handler,
-				 peerconnection_close_handler, sess);
-	if (err) {
-		warning("demo: session alloc failed (%m)\n", err);
-		goto out;
-	}
-
-	err = peerconnection_add_audio_track(sess->pc, config,
-					     baresip_aucodecl());
-	if (err) {
-		warning("demo: add_audio failed (%m)\n", err);
-		goto out;
-	}
-
-	err = peerconnection_add_video_track(sess->pc, config,
-					     baresip_vidcodecl());
-	if (err) {
-		warning("demo: add_video failed (%m)\n", err);
-		goto out;
-	}
-
-	list_append(&demo.sessl, &sess->le, sess);
-
- out:
-	if (err)
-		mem_deref(sess);
-	else if (sessp)
-		*sessp = sess;
-
-	return err;
-}
-
-
-static int handle_post_sdp(struct session *sess, const struct http_msg *msg)
+static int handle_put_sdp(struct session *sess, const struct http_msg *msg)
 {
 	struct session_description sd = {-1, NULL};
 	int err = 0;
 
-	info("demo: handle POST sdp: content is '%r/%r'\n",
+	info("demo: handle PUT sdp: content is '%r/%r'\n",
 	     &msg->ctyp.type, &msg->ctyp.subtype);
 
 	err = session_description_decode(&sd, msg->mb);
@@ -281,34 +67,6 @@ out:
 }
 
 
-static int handle_ice_candidate(struct session *sess, const struct odict *od)
-{
-	const char *cand, *mid;
-	struct pl pl_cand;
-	char *cand2 = NULL;
-	int err;
-
-	cand = odict_string(od, "candidate");
-	mid  = odict_string(od, "sdpMid");
-	if (!cand || !mid) {
-		warning("demo: candidate: missing 'candidate' or 'mid'\n");
-		return EPROTO;
-	}
-
-	err = re_regex(cand, str_len(cand), "candidate:[^]+", &pl_cand);
-	if (err)
-		return err;
-
-	pl_strdup(&cand2, &pl_cand);
-
-	peerconnection_add_ice_candidate(sess->pc, cand2, mid);
-
-	mem_deref(cand2);
-
-	return 0;
-}
-
-
 static void handle_get(struct http_conn *conn, const struct pl *path)
 {
 	const char *ext, *mime;
@@ -316,7 +74,7 @@ static void handle_get(struct http_conn *conn, const struct pl *path)
 	char *buf = NULL;
 	int err;
 
-	err = re_sdprintf(&buf, "./www%r", path);
+	err = re_sdprintf(&buf, "%s%r", demo.www_path, path);
 	if (err)
 		goto out;
 
@@ -370,7 +128,8 @@ static void http_req_handler(struct http_conn *conn,
 	else if (0 == pl_strcasecmp(&msg->met, "POST") &&
 		 0 == pl_strcasecmp(&msg->path, "/connect")) {
 
-		err = session_new(&sess);
+		err = session_new(&demo.sessl, &sess, &pc_config,
+				  demo.mnat, demo.menc);
 		if (err)
 			goto out;
 
@@ -391,11 +150,11 @@ static void http_req_handler(struct http_conn *conn,
 	else if (0 == pl_strcasecmp(&msg->met, "PUT") &&
 		 0 == pl_strcasecmp(&msg->path, "/sdp")) {
 
-		sess = session_lookup(msg);
+		sess = session_lookup(&demo.sessl, msg);
 		if (sess) {
 			if (msg->clen &&
 			    msg_ctype_cmp(&msg->ctyp, "application", "json")) {
-				err = handle_post_sdp(sess, msg);
+				err = handle_put_sdp(sess, msg);
 				if (err)
 					goto out;
 			}
@@ -421,7 +180,7 @@ static void http_req_handler(struct http_conn *conn,
 	}
 	else if (0 == pl_strcasecmp(&msg->met, "PATCH")) {
 
-		sess = session_lookup(msg);
+		sess = session_lookup(&demo.sessl, msg);
 		if (sess) {
 			enum {HASH_SIZE = 4, MAX_DEPTH = 2};
 
@@ -436,7 +195,7 @@ static void http_req_handler(struct http_conn *conn,
 				goto out;
 			}
 
-			handle_ice_candidate(sess, od);
+			session_handle_ice_candidate(sess, od);
 
 			/* sync reply */
 			http_reply(conn, 204, "No Content",
@@ -454,7 +213,7 @@ static void http_req_handler(struct http_conn *conn,
 		/* draft-ietf-wish-whip-03 */
 		info("demo: DELETE -> disconnect\n");
 
-		sess = session_lookup(msg);
+		sess = session_lookup(&demo.sessl, msg);
 		if (sess) {
 			info("demo: closing session %s\n", sess->id);
 			session_close(sess, 0);
@@ -481,7 +240,8 @@ static void http_req_handler(struct http_conn *conn,
 }
 
 
-int demo_init(const char *ice_server,
+int demo_init(const char *server_cert, const char *www_path,
+	      const char *ice_server,
 	      const char *stun_user, const char *credential)
 {
 	struct pl srv;
@@ -520,14 +280,16 @@ int demo_init(const char *ice_server,
 	sa_set_str(&laddr, "0.0.0.0", HTTP_PORT);
 	sa_set_str(&laddrs, "0.0.0.0", HTTPS_PORT);
 
-	err = http_listen(&httpsock, &laddr, http_req_handler, NULL);
+	err = http_listen(&demo.httpsock, &laddr, http_req_handler, NULL);
 	if (err)
 		return err;
 
-	err = https_listen(&httpssock, &laddrs, "./share/cert.pem",
+	err = https_listen(&demo.httpssock, &laddrs, server_cert,
 			   http_req_handler, NULL);
 	if (err)
 		return err;
+
+	demo.www_path = www_path;
 
 	info("demo: listening on:\n");
 	info("    http://%j:%u/\n",
@@ -543,7 +305,7 @@ void demo_close(void)
 {
 	list_flush(&demo.sessl);
 
-	httpssock = mem_deref(httpssock);
-	httpsock = mem_deref(httpsock);
+	demo.httpssock = mem_deref(demo.httpssock);
+	demo.httpsock = mem_deref(demo.httpsock);
 	pc_config.ice_server = mem_deref(pc_config.ice_server);
 }
