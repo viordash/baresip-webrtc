@@ -72,6 +72,38 @@ static void usage(void)
 }
 
 
+struct tmr tmr = {};
+
+static void timeout_handler(void *arg) {
+	void * tag = arg;
+	printf("                          ********timeout_handler, tag:%p, t:%lu\n", tag, tmr_jiffies());
+}
+
+static void CalledFromOtherThread(void * tag) {
+	printf("                          ---test 0, tag:%p, t:%lu\n", tag, tmr_jiffies());
+	tmr_init(&tmr);
+	printf("                          ---test 1, tag:%p, t:%lu\n", tag, tmr_jiffies());
+	re_thread_enter();
+	printf("                          ---test 2, tag:%p, t:%lu\n", tag, tmr_jiffies());
+
+	tmr_start(&tmr, 100, timeout_handler, tag);
+
+	printf("                          ---test 3, tag:%p, t:%lu\n", tag, tmr_jiffies());
+	re_thread_leave();
+	printf("                          ---test 4, tag:%p, t:%lu\n", tag, tmr_jiffies());
+	sys_msleep(2000);
+	printf("                          ---test 5, tag:%p, t:%lu\n", tag, tmr_jiffies());
+}
+
+static void *test_task(void *argument) {
+	sys_msleep(1000);
+
+	printf("                          --------from task, tag:%p, t:%lu\n", argument, tmr_jiffies());
+	CalledFromOtherThread(argument);
+	pthread_exit(NULL);
+}
+
+
 int main(int argc, char *argv[])
 {
 	struct config *config;
@@ -187,6 +219,13 @@ int main(int argc, char *argv[])
 		re_fprintf(stderr, "failed to init demo: %m\n", err);
 		goto out;
 	}
+
+	printf("                          --------from main, tag:%p, t:%lu\n", (void*)0x10CA1, tmr_jiffies());
+	CalledFromOtherThread((void*)0x10CA1);
+
+	pthread_t thread = 0;
+	pthread_create(&thread, NULL, test_task, (void*)0x00000042);
+	pthread_detach(thread);
 
 	re_main(signal_handler);
 
